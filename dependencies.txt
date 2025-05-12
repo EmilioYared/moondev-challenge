@@ -4,3 +4,6 @@ browser-image-compression
 jszip 
 react-hot-toast 
 resend
+compressorjs
+@zip.js/zip.js
+@types/node
