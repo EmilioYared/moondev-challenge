@@ -1,0 +1,6 @@
+@supabase/supabase-js 
+@supabase/auth-helpers-nextjs 
+browser-image-compression 
+jszip 
+react-hot-toast 
+resend
