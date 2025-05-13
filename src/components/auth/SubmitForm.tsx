@@ -25,17 +25,22 @@ export default function SubmitForm({ userId, userEmail }: SubmitFormProps) {
   const supabase = createClientComponentClient()
 
   const compressImage = (file: File): Promise<Blob> => {
-    return new Promise((resolve, reject) => {
-      new Compressor(file, {
-        maxWidth: 1080,
-        maxHeight: 1080,
-        quality: 0.8,
-        maxSize: 1024 * 1024, // 1MB
-        success: resolve,
-        error: reject,
-      })
+  return new Promise((resolve, reject) => {
+    new Compressor(file, {
+      maxWidth: 1080,
+      maxHeight: 1080,
+      quality: 0.8,
+      success(result) {
+        if (result.size <= 1024 * 1024) {
+          resolve(result)
+        } else {
+          reject(new Error('Compressed image is still too large'))
+        }
+      },
+      error: reject,
     })
-  }
+  })
+}
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

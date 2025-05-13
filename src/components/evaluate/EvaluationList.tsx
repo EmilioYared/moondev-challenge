@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect } from 'react'
-import Image from 'next/image'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import toast from 'react-hot-toast'
 
@@ -20,6 +19,7 @@ interface Submission {
   created_at: string
 }
 
+
 export default function EvaluationList() {
   const [submissions, setSubmissions] = useState<Submission[]>([])
   const [feedbackMap, setFeedbackMap] = useState<Record<string, string>>({})
@@ -31,105 +31,134 @@ export default function EvaluationList() {
     setupRealtimeSubscription()
   }, [])
 
+  useEffect(() => {
+    console.log("SUPABASE_URL:", process.env.NEXT_PUBLIC_SUPABASE_URL);
+    console.log("Current submissions:", submissions);
+    
+    // Test supabase connection
+    supabase
+      .from('submissions')
+      .select('count')
+      .then(({ data, error }) => {
+        if (error) {
+          console.error("Supabase connection error:", error);
+        } else {
+          console.log("Supabase connected successfully:", data);
+        }
+      });
+  }, []);
+
   const fetchSubmissions = async () => {
     try {
+      console.log("Fetching submissions...");
       const { data, error } = await supabase
         .from('submissions')
         .select('*')
-        .order('created_at', { ascending: false })
+        .order('created_at', { ascending: false });
 
-      if (error) throw error
-      setSubmissions(data || [])
+      if (error) throw error;
+      
+      console.log("Submissions fetched:", data);
+      setSubmissions(data || []);
     } catch (error: any) {
-      toast.error('Failed to load submissions')
-      console.error('Error:', error.message)
+      console.error('Error fetching submissions:', error.message);
+      toast.error('Failed to load submissions');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   }
 
   const setupRealtimeSubscription = () => {
-    const channel = supabase
-      .channel('submissions-changes')
-      .on('postgres_changes', 
-        { 
-          event: '*', 
-          schema: 'public', 
-          table: 'submissions' 
-        },
-        (payload) => {
-          if (payload.new) {
-            setSubmissions(current => 
-              current.map(sub => 
-                sub.id === payload.new.id ? payload.new : sub
-              )
-            )
-          }
+  const channel = supabase
+    .channel('submissions-changes')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'submissions' },
+      (payload) => {
+        const newSubmission = payload.new as Submission
+        if (newSubmission) {
+          setSubmissions((current) =>
+            current.some((sub) => sub.id === newSubmission.id)
+              ? current.map((sub) =>
+                  sub.id === newSubmission.id ? newSubmission : sub
+                )
+              : [newSubmission, ...current]
+          )
         }
-      )
-      .subscribe()
+      }
+    )
+    .subscribe()
 
-    return () => {
-      supabase.removeChannel(channel)
-    }
+  return () => {
+    supabase.removeChannel(channel)
   }
+}
 
   const handleDownload = async (url: string, fileName: string) => {
     try {
-      const response = await fetch(url)
-      if (!response.ok) throw new Error('Download failed')
+      // Log the URL for debugging
+      console.log("Attempting to download from:", url);
       
-      const blob = await response.blob()
-      const downloadUrl = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = downloadUrl
-      link.download = fileName
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      window.URL.revokeObjectURL(downloadUrl)
+      // Get a direct download URL from Supabase
+      const fileNameEncoded = encodeURIComponent(fileName);
+      const downloadUrl = `${url}?download=${fileNameEncoded}`;
+      
+      // Open in new window/tab for direct download
+      window.open(downloadUrl, '_blank');
+      
+      toast.success('Download started');
     } catch (error) {
-      toast.error('Failed to download file')
+      console.error('Download error:', error);
+      toast.error('Failed to download file');
     }
   }
 
   const updateSubmission = async (id: string, status: 'accepted' | 'rejected') => {
-    const feedback = feedbackMap[id]
+    const feedback = feedbackMap[id];
     if (!feedback?.trim()) {
-      toast.error('Please provide feedback before making a decision')
-      return
+      toast.error('Please provide feedback before making a decision');
+      return;
     }
 
     try {
+      // Update submission in database first
       const { error } = await supabase
         .from('submissions')
         .update({ 
           status, 
           feedback 
         })
-        .eq('id', id)
+        .eq('id', id);
 
-      if (error) throw error
+      if (error) throw error;
 
-      // Send notification via API route
-      const response = await fetch('/api/notifications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          submissionId: id,
-          action: status,
-          feedback
-        })
-      })
+      toast.success(`Submission status updated to ${status}`);
 
-      if (!response.ok) {
-        throw new Error('Failed to send notification')
+      // Send email notification
+      try {
+        const response = await fetch('/api/route', {  // Using route.ts directly
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            submissionId: id,
+            action: status,
+            feedback
+          })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'API request failed');
+        }
+
+        toast.success('Notification email sent');
+      } catch (emailError: any) {
+        console.error('Email error:', emailError);
+        toast.error(`Email sending failed: ${emailError.message}`);
       }
-
-      toast.success(`Candidate ${status === 'accepted' ? 'accepted' : 'rejected'} successfully`)
-      
     } catch (error: any) {
-      toast.error(error.message || 'Failed to update submission')
+      console.error('Error updating submission:', error);
+      toast.error(error.message || 'Failed to update submission');
     }
   }
 
@@ -157,11 +186,14 @@ export default function EvaluationList() {
             {/* Developer Info */}
             <div>
               <div className="relative h-48 w-48 mx-auto mb-4">
-                <Image
+                <img
                   src={submission.profile_picture_url}
                   alt={submission.full_name}
-                  fill
-                  className="rounded-lg object-cover"
+                  className="rounded-lg object-cover h-full w-full"
+                  onError={(e) => {
+                    console.error("Image failed to load:", submission.profile_picture_url);
+                    e.currentTarget.src = "/globe.svg"; // Fallback image
+                  }}
                 />
               </div>
               <h3 className="text-xl font-semibold text-center mb-4">

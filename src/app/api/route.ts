@@ -12,33 +12,20 @@ export async function POST(request: Request) {
     const supabase = createRouteHandlerClient({ cookies })
     const { submissionId, action, feedback } = await request.json()
 
+    // Log for debugging
+    console.log("API called with:", { submissionId, action, feedback });
+    console.log("Resend API Key exists:", !!process.env.RESEND_API_KEY);
+
     // Verify evaluator authentication
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Verify evaluator role
-    const { data: userData } = await supabase
-      .from('users')
-      .select('role')
-      .eq('id', session.user.id)
-      .single()
-
-    if (userData?.role !== 'evaluator') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    // Get submission and developer details
+    // Get submission details
     const { data: submission } = await supabase
       .from('submissions')
-      .select(`
-        *,
-        developer:user_id (
-          email,
-          full_name
-        )
-      `)
+      .select('*')
       .eq('id', submissionId)
       .single()
 
@@ -46,27 +33,30 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Submission not found' }, { status: 404 })
     }
 
-    // Send email notification
-    await resend.emails.send({
-      from: 'MoonDev <notifications@yourdomain.com>',
-      to: submission.developer.email,
-      subject: action === 'accepted' ? 'Welcome to MoonDev!' : 'MoonDev Application Update',
+    // Send email notification using Resend
+    const emailResult = await resend.emails.send({
+      from: 'MoonDev <yaredemilio@gmail.com>',
+      to: [submission.email],
+      subject: action === 'accepted' ? 'Welcome to the Team!' : 'Your MoonDev Application',
       html: `
-        <div>
-          <h1>${action === 'accepted' ? 'Congratulations!' : 'Application Update'}</h1>
-          <p>Dear ${submission.developer.full_name},</p>
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h1 style="color: ${action === 'accepted' ? '#10B981' : '#EF4444'};">
+            ${action === 'accepted' ? 'Congratulations! 🎉' : 'Thank You for Your Application'}
+          </h1>
+          <p>Dear ${submission.full_name},</p>
           <p>${feedback}</p>
           ${action === 'accepted' 
-            ? '<p>Welcome to the team! We\'ll be in touch shortly with next steps.</p>' 
-            : '<p>Thank you for your interest in joining our team.</p>'
-          }
+            ? '<p>We are excited to welcome you to our team!</p>' 
+            : '<p>Thank you for your interest in MoonDev.</p>'}
+          <p>Best regards,<br>MoonDev Team</p>
         </div>
       `
-    })
+    });
 
-    return NextResponse.json({ success: true })
-
+    console.log('Email sent successfully:', emailResult);
+    return NextResponse.json({ success: true, emailResult })
   } catch (error: any) {
+    console.error('Notification error:', error);
     return NextResponse.json(
       { error: error.message }, 
       { status: 500 }
